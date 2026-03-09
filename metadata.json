@@ -1,0 +1,5 @@
+{
+  "name": "GitHub Uploader",
+  "description": "A modern web application to upload files directly to your GitHub repositories.",
+  "requestFramePermissions": []
+}
