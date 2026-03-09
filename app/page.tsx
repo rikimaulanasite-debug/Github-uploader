@@ -7,9 +7,11 @@ import { Dashboard } from '@/components/Dashboard';
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isConfigured, setIsConfigured] = useState<boolean | null>(null);
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
+    checkConfig();
     checkAuth();
 
     const handleMessage = (event: MessageEvent) => {
@@ -20,6 +22,16 @@ export default function Home() {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  const checkConfig = async () => {
+    try {
+      const res = await fetch('/api/auth/config');
+      const data = await res.json();
+      setIsConfigured(data.configured);
+    } catch (e) {
+      setIsConfigured(false);
+    }
+  };
 
   const checkAuth = async () => {
     try {
@@ -66,7 +78,7 @@ export default function Home() {
     setUser(null);
   };
 
-  if (isAuthenticated === null) {
+  if (isAuthenticated === null || isConfigured === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-zinc-50">
         <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
@@ -79,7 +91,11 @@ export default function Home() {
       {isAuthenticated ? (
         <Dashboard user={user} onLogout={handleLogout} />
       ) : (
-        <ConnectGitHub onConnect={handleConnect} />
+        <ConnectGitHub 
+          onConnect={handleConnect} 
+          isConfigured={isConfigured} 
+          onConfigSaved={checkConfig} 
+        />
       )}
     </div>
   );

@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 export async function GET(request: Request) {
-  const clientId = process.env.GITHUB_CLIENT_ID;
+  const cookieStore = await cookies();
+  const clientId = process.env.GITHUB_CLIENT_ID || cookieStore.get('github_client_id')?.value;
+  
   if (!clientId) {
-    return NextResponse.json({ error: 'GITHUB_CLIENT_ID is not configured in AI Studio Secrets.' }, { status: 500 });
+    return NextResponse.json({ error: 'GITHUB_CLIENT_ID is not configured. Please set it up first.' }, { status: 500 });
   }
 
   const appUrl = process.env.APP_URL;

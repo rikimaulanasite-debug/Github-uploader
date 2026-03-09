@@ -9,11 +9,12 @@ export async function GET(request: Request) {
     return new NextResponse('Missing code', { status: 400 });
   }
 
-  const clientId = process.env.GITHUB_CLIENT_ID;
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+  const cookieStore = await cookies();
+  const clientId = process.env.GITHUB_CLIENT_ID || cookieStore.get('github_client_id')?.value;
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET || cookieStore.get('github_client_secret')?.value;
 
   if (!clientId || !clientSecret) {
-    return new NextResponse('OAuth Error: GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET is missing in AI Studio Secrets.', { status: 500 });
+    return new NextResponse('OAuth Error: GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET is missing. Please configure them first.', { status: 500 });
   }
 
   try {
