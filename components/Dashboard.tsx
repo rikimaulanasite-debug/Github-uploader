@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { LogOut, FolderGit2, Upload, File as FileIcon, X, CheckCircle, Loader2, Search } from 'lucide-react';
+import { LogOut, FolderGit2, Upload, File as FileIcon, X, CheckCircle, Loader2, Search, Plus, Archive } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import JSZip from 'jszip';
 
 export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void }) {
   const [repos, setRepos] = useState<any[]>([]);
@@ -8,11 +9,19 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
   const [selectedRepo, setSelectedRepo] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<{name: string, size: number, content: string}[]>([]);
   const [commitMessage, setCommitMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState<{ url: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Create Repo State
+  const [showCreateRepo, setShowCreateRepo] = useState(false);
+  const [newRepoName, setNewRepoName] = useState('');
+  const [newRepoDesc, setNewRepoDesc] = useState('');
+  const [newRepoPrivate, setNewRepoPrivate] = useState(false);
+  const [creatingRepo, setCreatingRepo] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -34,29 +43,6 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      setFiles((prev) => [...prev, ...newFiles]);
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files) {
-      const newFiles = Array.from(e.dataTransfer.files);
-      setFiles((prev) => [...prev, ...newFiles]);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
   const convertToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -71,6 +57,66 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
     });
   };
 
+  const processFiles = async (fileList: File[]) => {
+    const newProcessedFiles: {name: string, size: number, content: string}[] = [];
+    
+    for (const file of fileList) {
+      if (file.name.endsWith('.zip')) {
+        try {
+          const zip = new JSZip();
+          const contents = await zip.loadAsync(file);
+          
+          for (const [relativePath, zipEntry] of Object.entries(contents.files)) {
+            if (!zipEntry.dir) {
+              const base64Content = await zipEntry.async('base64');
+              // We don't have exact size without decompressing, so we estimate or use 0
+              newProcessedFiles.push({
+                name: relativePath,
+                size: base64Content.length * 0.75, // rough estimate of bytes from base64
+                content: base64Content
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Failed to extract ZIP:', err);
+          setError(`Failed to extract ${file.name}`);
+        }
+      } else {
+        const base64Content = await convertToBase64(file);
+        newProcessedFiles.push({
+          name: file.name,
+          size: file.size,
+          content: base64Content
+        });
+      }
+    }
+    
+    setFiles((prev) => [...prev, ...newProcessedFiles]);
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const selectedFiles = Array.from(e.target.files);
+      await processFiles(selectedFiles);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      await processFiles(droppedFiles);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
   const handleUpload = async () => {
     if (!selectedRepo || files.length === 0) return;
     
@@ -79,12 +125,10 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
     setUploadSuccess(null);
 
     try {
-      const fileData = await Promise.all(
-        files.map(async (file) => ({
-          path: file.name, // In a real app, we might want to preserve directory structure if uploaded via folder
-          content: await convertToBase64(file),
-        }))
-      );
+      const fileData = files.map((file) => ({
+        path: file.name,
+        content: file.content,
+      }));
 
       const res = await fetch('/api/github/upload', {
         method: 'POST',
@@ -114,6 +158,42 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
     }
   };
 
+  const handleCreateRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingRepo(true);
+    setRepoError(null);
+
+    try {
+      const res = await fetch('/api/github/repos/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newRepoName,
+          description: newRepoDesc,
+          private: newRepoPrivate,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create repository');
+      }
+
+      // Add to list and select it
+      setRepos([data.repo, ...repos]);
+      setSelectedRepo(data.repo);
+      setShowCreateRepo(false);
+      setNewRepoName('');
+      setNewRepoDesc('');
+      setNewRepoPrivate(false);
+    } catch (err: any) {
+      setRepoError(err.message);
+    } finally {
+      setCreatingRepo(false);
+    }
+  };
+
   const filteredRepos = repos.filter(repo => 
     repo.full_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -137,10 +217,19 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
 
         <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl flex flex-col h-[600px]">
           <div className="p-4 border-b border-zinc-800/50">
-            <h3 className="font-medium text-zinc-100 mb-3 flex items-center gap-2">
-              <FolderGit2 className="w-5 h-5 text-indigo-400" />
-              Repositories
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium text-zinc-100 flex items-center gap-2">
+                <FolderGit2 className="w-5 h-5 text-indigo-400" />
+                Repositories
+              </h3>
+              <button 
+                onClick={() => setShowCreateRepo(true)}
+                className="p-1.5 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 rounded-md transition-colors"
+                title="Create new repository"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
               <input 
@@ -215,7 +304,9 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
                   <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-400 transition-colors" />
                 </div>
                 <p className="text-lg font-medium text-zinc-200 mb-1">Click or drag files here</p>
-                <p className="text-zinc-500 text-sm">Support for multiple files</p>
+                <p className="text-zinc-500 text-sm flex items-center gap-1">
+                  <Archive className="w-4 h-4" /> ZIP files will be automatically extracted
+                </p>
               </div>
 
               <AnimatePresence>
@@ -302,6 +393,94 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
           )}
         </div>
       </div>
+      {/* Create Repo Modal */}
+      <AnimatePresence>
+        {showCreateRepo && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-zinc-100">Create Repository</h3>
+                <button 
+                  onClick={() => setShowCreateRepo(false)}
+                  className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateRepo} className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-zinc-400 mb-1.5 block">Repository Name *</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newRepoName}
+                    onChange={(e) => setNewRepoName(e.target.value)}
+                    placeholder="e.g. my-awesome-project"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-zinc-100"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium text-zinc-400 mb-1.5 block">Description (Optional)</label>
+                  <input 
+                    type="text" 
+                    value={newRepoDesc}
+                    onChange={(e) => setNewRepoDesc(e.target.value)}
+                    placeholder="What is this repository for?"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-zinc-100"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 py-2">
+                  <input 
+                    type="checkbox" 
+                    id="private-repo"
+                    checked={newRepoPrivate}
+                    onChange={(e) => setNewRepoPrivate(e.target.checked)}
+                    className="w-4 h-4 rounded border-zinc-700 text-indigo-600 focus:ring-indigo-600 focus:ring-offset-zinc-900 bg-zinc-950"
+                  />
+                  <label htmlFor="private-repo" className="text-sm text-zinc-300 cursor-pointer">
+                    Make repository private
+                  </label>
+                </div>
+
+                {repoError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm">
+                    {repoError}
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateRepo(false)}
+                    className="flex-1 px-4 py-2.5 rounded-xl font-medium text-zinc-300 hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingRepo || !newRepoName}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white px-4 py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    {creatingRepo ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      'Create'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
