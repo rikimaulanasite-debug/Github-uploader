@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { LogOut, FolderGit2, Upload, File as FileIcon, X, CheckCircle, Loader2, Search, Plus, Archive } from 'lucide-react';
+import { LogOut, FolderGit2, Upload, File as FileIcon, X, CheckCircle, Loader2, Search, Plus, Archive, Lock, Unlock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import JSZip from 'jszip';
 
@@ -22,6 +22,7 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
   const [newRepoPrivate, setNewRepoPrivate] = useState(false);
   const [creatingRepo, setCreatingRepo] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
+  const [togglingVisibility, setTogglingVisibility] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -194,6 +195,38 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
     }
   };
 
+  const toggleRepoVisibility = async () => {
+    if (!selectedRepo) return;
+    setTogglingVisibility(true);
+    setError(null);
+
+    try {
+      const newVisibility = !selectedRepo.private;
+      const res = await fetch('/api/github/repos/visibility', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owner: selectedRepo.owner.login,
+          repo: selectedRepo.name,
+          private: newVisibility,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update visibility');
+      }
+
+      setSelectedRepo(data.repo);
+      setRepos(repos.map(r => r.id === data.repo.id ? data.repo : r));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setTogglingVisibility(false);
+    }
+  };
+
   const filteredRepos = repos.filter(repo => 
     repo.full_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -277,14 +310,36 @@ export function Dashboard({ user, onLogout }: { user: any; onLogout: () => void 
             </div>
           ) : (
             <div className="flex-1 flex flex-col">
-              <div className="mb-8">
-                <h2 className="text-2xl font-semibold text-zinc-100 flex items-center gap-3">
-                  {selectedRepo.name}
-                  <span className="text-xs font-normal px-2 py-1 bg-zinc-800 text-zinc-400 rounded-md">
-                    {selectedRepo.default_branch}
-                  </span>
-                </h2>
-                <p className="text-zinc-400 mt-1">{selectedRepo.description || 'No description'}</p>
+              <div className="mb-8 flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-semibold text-zinc-100 flex items-center gap-3 flex-wrap">
+                    {selectedRepo.name}
+                    <span className="text-xs font-normal px-2 py-1 bg-zinc-800 text-zinc-400 rounded-md">
+                      {selectedRepo.default_branch}
+                    </span>
+                    <span className={`text-xs font-normal px-2 py-1 rounded-md flex items-center gap-1.5 ${selectedRepo.private ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                      {selectedRepo.private ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                      {selectedRepo.private ? 'Private' : 'Public'}
+                    </span>
+                  </h2>
+                  <p className="text-zinc-400 mt-2">{selectedRepo.description || 'No description'}</p>
+                </div>
+                
+                <button
+                  onClick={toggleRepoVisibility}
+                  disabled={togglingVisibility}
+                  className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-sm text-zinc-200 rounded-xl transition-colors shrink-0"
+                  title={`Change to ${selectedRepo.private ? 'Public' : 'Private'}`}
+                >
+                  {togglingVisibility ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : selectedRepo.private ? (
+                    <Unlock className="w-4 h-4" />
+                  ) : (
+                    <Lock className="w-4 h-4" />
+                  )}
+                  <span className="hidden sm:inline">Make {selectedRepo.private ? 'Public' : 'Private'}</span>
+                </button>
               </div>
 
               <div 
